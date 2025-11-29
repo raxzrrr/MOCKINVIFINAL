@@ -25,32 +25,49 @@ export const generateConsistentUUID = (userId: string): string => {
   }
 };
 
-// New function to get or create user profile using database function
+// Workaround: Skip broken database function, just return UUID
+// The payment edge function will create the profile when needed
 export const getOrCreateUserProfile = async (
   clerkUserId: string,
   fullName: string,
   userEmail: string,
   userRole: string = 'student'
 ): Promise<string> => {
+  const supabaseUserId = generateConsistentUUID(clerkUserId);
+  
+  // Check if profile already exists
   try {
-    const { data, error } = await supabase.rpc('get_or_create_user_profile', {
-      clerk_user_id: clerkUserId,
-      full_name: fullName,
-      user_email: userEmail,
-      user_role: userRole
-    });
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', supabaseUserId)
+      .maybeSingle();
 
-    if (error) {
-      console.error('Error getting or creating user profile:', error);
-      throw error;
+    if (existingProfile) {
+      console.log('Profile already exists:', existingProfile.id);
+      return existingProfile.id;
     }
 
-    return data;
+    // Also check by email
+    const { data: emailProfile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', userEmail)
+      .maybeSingle();
+
+    if (emailProfile) {
+      console.log('Found profile by email:', emailProfile.id);
+      return emailProfile.id;
+    }
   } catch (error) {
-    console.error('Failed to get or create user profile:', error);
-    // Fallback to local UUID generation
-    return generateConsistentUUID(clerkUserId);
+    console.warn('Error checking for existing profile:', error);
   }
+
+  // Skip the broken database function - just return the UUID
+  // The payment edge function will create the profile when payment is made
+  // This prevents the app from crashing
+  console.log('Skipping broken database function, returning UUID. Profile will be created by payment edge function if needed.');
+  return supabaseUserId;
 };
 
 export const validateUUID = (uuid: string): boolean => {
