@@ -152,16 +152,18 @@ const RazorpayButton: React.FC<RazorpayButtonProps> = ({
             }
 
             console.log('=== PAYMENT VERIFICATION SUCCESS ===');
+            
+            // Wait a bit longer to ensure database transaction is committed
             toast({
               title: "Payment Successful!",
-              description: `Welcome to ${planName} plan! Your subscription is now active.`,
+              description: `Welcome to ${planName} plan! Your subscription is being activated...`,
             });
 
-            // Refresh the page to update subscription status
+            // Give more time for database to commit and then reload
             setTimeout(() => {
               console.log('Reloading page to refresh subscription status...');
               window.location.reload();
-            }, 2000);
+            }, 3000);
           } catch (error) {
             console.error('=== PAYMENT VERIFICATION ERROR ===', error);
             
