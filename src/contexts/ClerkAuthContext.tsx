@@ -45,6 +45,7 @@ export const ClerkAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [loading, setLoading] = useState(true);
   const [supabaseSession, setSupabaseSession] = useState<any>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [actualProfileId, setActualProfileId] = useState<string | null>(null); // Store actual profile ID from DB
   const { toast } = useToast();
 
   // Check for temporary admin access
@@ -52,6 +53,11 @@ export const ClerkAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Function to get consistent Supabase user ID
   const getSupabaseUserId = () => {
+    // If we have the actual profile ID from database, use it (most accurate)
+    if (actualProfileId) {
+      return actualProfileId;
+    }
+    
     if (isTempAdmin) {
       return 'temp-admin-id';
     }
@@ -59,11 +65,10 @@ export const ClerkAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       console.log('getSupabaseUserId: No userId available');
       return null;
     }
-    // For now, use the local generation as fallback
-    // In the future, this could be enhanced to use the database function
+    // Fallback to generated UUID if we don't have actual ID yet
     const supabaseId = generateConsistentUUID(userId);
-    console.log('getSupabaseUserId: Generated Supabase ID:', { clerkId: userId, supabaseId });
-    return supabaseId; // Return only the UUID string, not an object
+    console.log('getSupabaseUserId: Using generated Supabase ID (fallback):', supabaseId);
+    return supabaseId;
   };
 
   // Set up Supabase session with Clerk token
@@ -183,6 +188,7 @@ export const ClerkAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         email: 'admin@interview.ai',
         role: 'admin'
       });
+      setActualProfileId('temp-admin-id');
       setIsAuthenticated(true);
       setLoading(false);
       return;
@@ -222,7 +228,7 @@ export const ClerkAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       // Set up Supabase session (this can fail but shouldn't affect authentication state)
       setupSupabaseSession();
 
-      // Sync with supabase for data consistency
+      // Sync with supabase for data consistency - this will get and store the actual profile ID
       syncUserWithSupabase(userId, userName, userEmail, role);
     } else if (clerkUser && !userId) {
       // Edge case: we have clerkUser but no userId - this shouldn't happen but let's handle it
@@ -250,6 +256,7 @@ export const ClerkAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setProfile(null);
       setSupabaseSession(null);
       setIsAuthenticated(false);
+      setActualProfileId(null); // Clear actual profile ID when no user
       supabase.auth.signOut();
     }
     
@@ -264,17 +271,23 @@ export const ClerkAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const supabaseUserId = await getOrCreateUserProfile(userId, fullName, email, role || 'student');
       console.log('User profile synced with ID:', supabaseUserId);
       
-      // Verify the profile was actually created
-      const { data: verifyProfile, error: verifyError } = await supabase
-        .from('profiles')
-        .select('id, email, full_name')
-        .eq('id', supabaseUserId)
-        .maybeSingle();
+      // Store the actual profile ID from database
+      setActualProfileId(supabaseUserId);
       
-      if (verifyProfile) {
-        console.log('✅ Profile verified in database:', verifyProfile);
-      } else {
-        console.error('❌ Profile NOT found in database after creation attempt!', verifyError);
+      // Also verify and update if needed by looking up by email
+      if (email) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('email', email)
+          .maybeSingle();
+        
+        if (profileData?.id) {
+          console.log('Found actual profile ID from database by email:', profileData.id);
+          setActualProfileId(profileData.id);
+          // Update profile with correct ID
+          setProfile(prev => prev ? { ...prev, id: profileData.id } : null);
+        }
       }
     } catch (error) {
       console.error('Error syncing user with Supabase:', error);
@@ -299,6 +312,7 @@ export const ClerkAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setProfile(null);
       setSupabaseSession(null);
       setIsAuthenticated(false);
+      setActualProfileId(null); // Clear actual profile ID on logout
       toast({
         title: "Logged Out",
         description: "You have been successfully logged out",
