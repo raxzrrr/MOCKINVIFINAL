@@ -263,6 +263,19 @@ export const ClerkAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       // Use the new database function to ensure user profile exists
       const supabaseUserId = await getOrCreateUserProfile(userId, fullName, email, role || 'student');
       console.log('User profile synced with ID:', supabaseUserId);
+      
+      // Verify the profile was actually created
+      const { data: verifyProfile, error: verifyError } = await supabase
+        .from('profiles')
+        .select('id, email, full_name')
+        .eq('id', supabaseUserId)
+        .maybeSingle();
+      
+      if (verifyProfile) {
+        console.log('✅ Profile verified in database:', verifyProfile);
+      } else {
+        console.error('❌ Profile NOT found in database after creation attempt!', verifyError);
+      }
     } catch (error) {
       console.error('Error syncing user with Supabase:', error);
       // Don't show error to user, just log it

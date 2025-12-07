@@ -63,11 +63,56 @@ export const getOrCreateUserProfile = async (
     console.warn('Error checking for existing profile:', error);
   }
 
-  // Skip the broken database function - just return the UUID
-  // The payment edge function will create the profile when payment is made
-  // This prevents the app from crashing
-  console.log('Skipping broken database function, returning UUID. Profile will be created by payment edge function if needed.');
-  return supabaseUserId;
+  // Call the database function to create the profile
+  try {
+    console.log('Calling database function to create profile:', { clerkUserId, fullName, userEmail, userRole });
+    const { data: profileId, error: rpcError } = await supabase.rpc('get_or_create_user_profile', {
+      clerk_user_id: clerkUserId,
+      full_name: fullName,
+      user_email: userEmail,
+      user_role: userRole
+    });
+
+    if (rpcError) {
+      console.error('Error calling get_or_create_user_profile:', rpcError);
+      // Fallback: try direct insert if RPC fails
+      try {
+        const { data: insertData, error: insertError } = await supabase
+          .from('profiles')
+          .insert({
+            id: supabaseUserId,
+            full_name: fullName,
+            email: userEmail,
+            role: userRole,
+            auth_provider: 'clerk'
+          })
+          .select('id')
+          .single();
+
+        if (insertError) {
+          console.error('Error inserting profile directly:', insertError);
+          return supabaseUserId;
+        }
+
+        console.log('Profile created via direct insert:', insertData.id);
+        return insertData.id;
+      } catch (insertErr) {
+        console.error('Direct insert also failed:', insertErr);
+        return supabaseUserId;
+      }
+    }
+
+    if (profileId) {
+      console.log('Profile created successfully via database function:', profileId);
+      return profileId;
+    }
+
+    console.warn('Database function returned no profile ID, using generated UUID');
+    return supabaseUserId;
+  } catch (error) {
+    console.error('Error creating profile via database function:', error);
+    return supabaseUserId;
+  }
 };
 
 export const validateUUID = (uuid: string): boolean => {

@@ -18,6 +18,42 @@ export const useInterviewUsage = () => {
   const [loading, setLoading] = useState(true);
   const { getSupabaseUserId, isAuthenticated } = useAuth();
 
+  // Helper function to ensure profile exists before creating usage record
+  const ensureProfileExists = async (supabaseUserId: string): Promise<boolean> => {
+    try {
+      // Check if profile exists
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', supabaseUserId)
+        .maybeSingle();
+
+      if (profile) {
+        return true; // Profile exists
+      }
+
+      if (profileError) {
+        console.warn('Error checking profile:', profileError);
+      }
+
+      // Profile doesn't exist, wait a bit and retry (profile might be creating)
+      console.log('Profile not found, waiting for profile creation...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Retry check
+      const { data: retryProfile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', supabaseUserId)
+        .maybeSingle();
+
+      return !!retryProfile;
+    } catch (error) {
+      console.error('Error ensuring profile exists:', error);
+      return false;
+    }
+  };
+
   useEffect(() => {
     const fetchUsage = async () => {
       const supabaseUserId = getSupabaseUserId();
@@ -29,6 +65,15 @@ export const useInterviewUsage = () => {
       }
 
       try {
+        // First, ensure the profile exists
+        const profileExists = await ensureProfileExists(supabaseUserId);
+        
+        if (!profileExists) {
+          console.warn('Profile does not exist yet, cannot create usage record. Profile creation may still be in progress.');
+          setLoading(false);
+          return;
+        }
+
         const { data, error } = await supabase
           .from('user_interview_usage')
           .select('*')
@@ -36,7 +81,7 @@ export const useInterviewUsage = () => {
           .single();
 
         if (error && error.code === 'PGRST116') {
-          // No record exists, create one
+          // No record exists, create one (now that we know profile exists)
           const { data: newUsage, error: insertError } = await supabase
             .from('user_interview_usage')
             .insert({
@@ -49,6 +94,10 @@ export const useInterviewUsage = () => {
 
           if (insertError) {
             console.error('Error creating usage record:', insertError);
+            // If it's a foreign key error, the profile might have been deleted or doesn't exist
+            if (insertError.code === '23503') {
+              console.error('Foreign key constraint failed - profile does not exist in database');
+            }
             return;
           }
 
